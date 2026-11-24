@@ -728,6 +728,30 @@ async function apiYtSearch(query, res) {
     items: page > 1 ? [] : items,
   });
 }
+// Pre-warm the remux job for the likeliest qualities so pressing play starts instantly
+function warmHybrid(payload) {
+  try {
+    const qs = (payload && payload.qualities) || [];
+    const picks = [];
+    const def = qs[payload.defaultQuality || 0];
+    if (def && typeof def.url === 'string' && def.url.includes('/api/yt/hybrid')) picks.push(def);
+    for (const q of qs) {
+      if (picks.length >= 2) break;
+      if (q && typeof q.url === 'string' && q.url.includes('/api/yt/hybrid') && q !== picks[0] && (q.height || 0) <= 720) picks.push(q);
+    }
+    for (const q of picks) {
+      setTimeout(() => {
+        try {
+          const r = http.get({ host: '127.0.0.1', port: Number(PORT) || 3000, path: q.url, headers: { Range: 'bytes=0-1' } },
+            () => { try { r.destroy(); } catch (_) {} });
+          r.on('error', () => {});
+          setTimeout(() => { try { r.destroy(); } catch (_) {} }, 15000);
+        } catch (_) {}
+      }, 250);
+    }
+  } catch (_) {}
+}
+
 async function apiYtStreams(id, res) {
   // 1) yt-dlp primary: direct streams + full quality ladder (360p–1080p hybrid)
   let dlp = null;
@@ -739,6 +763,7 @@ async function apiYtStreams(id, res) {
         const s = await pipedGet('/search?q=' + encodeURIComponent((payload.title || id).slice(0, 80)) + '&filter=videos');
         payload.related = (s.items || []).filter(x => x.type === 'stream' && ytVideoId(x.url) !== id).map(normYtItem).slice(0, 12);
       } catch (_) {}
+      warmHybrid(payload);
       return sendJSON(res, 200, payload);
     }
   }
