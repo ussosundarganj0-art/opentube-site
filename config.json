@@ -1,0 +1,6 @@
+{
+  "supabaseUrl": "https://ncdncukztioinxszbsaj.supabase.co",
+  "publishableKey": "sb_publishable_NHuepIGnrZuOj-EWVhrSwQ_ssSStvRe",
+  "projectRef": "ncdncukztioinxszbsaj",
+  "note": "Secret key stays in Supabase dashboard; this app uses the publishable key + RLS policies."
+}
