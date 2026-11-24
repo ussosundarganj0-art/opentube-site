@@ -347,6 +347,26 @@ async function apiYtDebug(req, res, params) {
   return sendJSON(res, 200, out);
 }
 
+// --- Turbo mode: clean-IP extraction via the sandbox tunnel (tunnel.json "phonebook" in the repo) ---
+const TUNNEL_BOOK = 'https://raw.githubusercontent.com/ussosundarganj0-art/opentube-site/main/tunnel.json';
+let tunnelCache = { at: 0, url: null };
+async function getTunnelUrl() {
+  if (tunnelCache.url && Date.now() - tunnelCache.at < 120000) return tunnelCache.url;
+  try {
+    const r = await fetch(TUNNEL_BOOK, { signal: AbortSignal.timeout(8000), cache: 'no-store' });
+    const j = await r.json();
+    let u = null;
+    try {
+      const host = new URL(String(j.url || '')).host;
+      if (host.endsWith('.trycloudflare.com')) u = String(j.url).replace(/\/$/, '');
+    } catch (_) {}
+    tunnelCache = { at: Date.now(), url: u };
+    return u;
+  } catch (_) {
+    return tunnelCache.url; // stale is better than nothing; caller validates
+  }
+}
+
 function dlpJson(id) {
   const key = 'dlp|' + id;
   const c = cacheGet(key);
@@ -688,6 +708,23 @@ async function apiYtStreams(id, res) {
       return sendJSON(res, 200, payload);
     }
   }
+  // 1.5) Turbo fallback: the sandbox tunnel extracts with a clean IP and proxies the bytes
+  try {
+    const t = await getTunnelUrl();
+    if (t) {
+      const r = await fetch(t + '/api/yt/streams/' + encodeURIComponent(id), { signal: AbortSignal.timeout(35000) }).then((x) => x.json());
+      if (r && !r.unavailable && ((r.qualities || []).length || (r.streams || []).length)) {
+        const fix = (arr) => (arr || []).forEach((x) => {
+          if (x && typeof x.url === 'string' && x.url.startsWith('/')) x.url = t + x.url;
+          if (x && x.hls && typeof x.hls.url === 'string' && x.hls.url.startsWith('/')) x.hls.url = t + x.hls.url;
+        });
+        fix(r.qualities); fix(r.streams); fix(r.subtitles);
+        if (typeof r.thumb === 'string' && r.thumb.startsWith('/')) r.thumb = t + r.thumb;
+        r.via = 'turbo';
+        return sendJSON(res, 200, r);
+      }
+    }
+  } catch (_) {}
   // 2) Piped fallback (proxied muxed streams)
   try {
     const d = await pipedGet(`/streams/${encodeURIComponent(id)}`);
