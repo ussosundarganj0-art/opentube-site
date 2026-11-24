@@ -338,6 +338,9 @@ async function apiYtDebug(req, res, params) {
       resolve();
     });
   });
+  await new Promise((resolve) => {
+    execFile('sh', ['-c', 'ls -la /opt/bgutil/server/build 2>&1 | head -6; echo ---NODE_MODULES---; ls /opt/bgutil/server/node_modules 2>/dev/null | head -8; echo ---PS---; ps aux | grep -i node | grep -v grep; echo ---PIP---; pip3 show bgutil-ytdlp-pot-provider 2>/dev/null | head -3'], { timeout: 15000 }, (e, so) => { out.files = String(so).slice(0, 1500); resolve(); });
+  });
   return sendJSON(res, 200, out);
 }
 
