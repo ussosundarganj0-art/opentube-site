@@ -296,13 +296,61 @@ function findFfmpeg() {
 }
 const FFMPEG = findFfmpeg();
 
+async function apiYtDebug(req, res, params) {
+  const variant = params.get('client') || '';
+  const vid = (params.get('vid') || 'dQw4w9WgXcQ').replace(/[^\w-]/g, '');
+  const { execFile } = require('child_process');
+  const out = { variant: variant || '(default)', vid };
+  await new Promise((resolve) => {
+    const r = http.get('http://127.0.0.1:4416/version', (pr) => {
+      let b = ''; pr.on('data', (c) => b += c);
+      pr.on('end', () => { out.provider = b.slice(0, 200); resolve(); });
+    });
+    r.on('error', (e) => { out.provider = 'DOWN: ' + e.message; resolve(); });
+  });
+  await new Promise((resolve) => {
+    execFile('yt-dlp', ['-v', '--version'], { timeout: 15000 }, (e, so, se) => {
+      out.ytdlp = String(so).trim();
+      out.poLine = (String(se).split('\n').find((l) => l.includes('PO Token')) || '(no PO line)').trim();
+      resolve();
+    });
+  });
+  await new Promise((resolve) => {
+    const args = ['-j', '--no-warnings', '--no-playlist', '--socket-timeout', '15'];
+    if (variant) args.push('--extractor-args', 'youtube:player-client=' + variant);
+    args.push('https://www.youtube.com/watch?v=' + vid);
+    const t0 = Date.now();
+    execFile('yt-dlp', args, { timeout: 75000 }, (e, so, se) => {
+      out.tookMs = Date.now() - t0;
+      if (e) {
+        out.ok = false;
+        out.error = String(e.message).slice(0, 200);
+        out.stderr = String(se).split('\n').filter((l) => l.trim()).slice(-8).join(' | ').slice(0, 800);
+      } else {
+        try {
+          const j = JSON.parse(so.split('\n')[0] || '{}');
+          out.ok = true;
+          out.title = j.title;
+          out.formats = (j.formats || []).length;
+          out.maxH = Math.max(0, ...(j.formats || []).map((f) => f.height || 0));
+        } catch (pe) { out.ok = false; out.parseError = String(pe); out.head = String(so).slice(0, 200); }
+      }
+      resolve();
+    });
+  });
+  return json(res, 200, out);
+}
+
 function dlpJson(id) {
   const key = 'dlp|' + id;
   const c = cacheGet(key);
   if (c) return Promise.resolve(c);
   return new Promise((resolve, reject) => {
-    execFile('yt-dlp', ['-j', '--no-warnings', '--no-playlist', '--socket-timeout', '15',
-      'https://www.youtube.com/watch?v=' + id], { timeout: 90000 }, (err, stdout) => {
+    const args = ['-j', '--no-warnings', '--no-playlist', '--socket-timeout', '15'];
+    const extra = (process.env.YTDLP_ARGS || '').trim();
+    if (extra) args.push(...extra.split(' '));
+    args.push('https://www.youtube.com/watch?v=' + id);
+    execFile('yt-dlp', args, { timeout: 90000 }, (err, stdout) => {
       if (err) return reject(err);
       try {
         const j = JSON.parse(stdout);
@@ -1154,6 +1202,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/yt/search') return await apiYtSearch(u.searchParams, res);
     if (p === '/api/yt/trending') return await apiYtTrending(u.searchParams, res);
     if (p.startsWith('/api/yt/streams/')) return await apiYtStreams(p.slice('/api/yt/streams/'.length), res);
+    if (p === '/api/yt/debug') return await apiYtDebug(req, res, u.searchParams);
     if (p === '/api/yt/hybrid') return await ytHybrid(req, res, u.searchParams);
     if (p.startsWith('/api/yt/channel/')) return await apiYtChannel(p.slice('/api/yt/channel/'.length), res);
     if (p.startsWith('/api/yt/playlist/')) return await apiYtPlaylist(p.slice('/api/yt/playlist/'.length), res);
