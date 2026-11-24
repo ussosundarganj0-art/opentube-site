@@ -316,7 +316,7 @@ async function apiYtDebug(req, res, params) {
     });
   });
   await new Promise((resolve) => {
-    const args = ['-j', '-v', '--no-playlist', '--socket-timeout', '15'];
+    const args = ['-j', '-v', '--no-playlist', '--socket-timeout', '15', '--js-runtimes', 'node'];
     if (variant) args.push('--extractor-args', 'youtube:player-client=' + variant);
     args.push('https://www.youtube.com/watch?v=' + vid);
     const t0 = Date.now();
@@ -352,7 +352,7 @@ function dlpJson(id) {
   const c = cacheGet(key);
   if (c) return Promise.resolve(c);
   return new Promise((resolve, reject) => {
-    const args = ['-j', '--no-warnings', '--no-playlist', '--socket-timeout', '15'];
+    const args = ['-j', '--no-warnings', '--no-playlist', '--socket-timeout', '15', '--js-runtimes', 'node'];
     const extra = (process.env.YTDLP_ARGS || '').trim();
     if (extra) args.push(...extra.split(' '));
     args.push('https://www.youtube.com/watch?v=' + id);
