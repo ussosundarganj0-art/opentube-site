@@ -347,6 +347,16 @@ async function apiYtDebug(req, res, params) {
   return sendJSON(res, 200, out);
 }
 
+// --- Keep-awake: the free Render instance sleeps after 15 min of no inbound traffic.
+// A tiny self-ping through the public URL every 5 minutes keeps it always instant.
+const PUBLIC_URL = process.env.PUBLIC_URL || 'https://opentube-west.onrender.com';
+if (process.env.KEEP_AWAKE !== '0') {
+  setInterval(() => {
+    fetch(PUBLIC_URL + '/api/config').catch(() => {});
+  }, 5 * 60 * 1000);
+  setTimeout(() => { fetch(PUBLIC_URL + '/api/config').catch(() => {}); }, 20 * 1000);
+}
+
 // --- Turbo mode: clean-IP extraction via the sandbox tunnel (tunnel.json "phonebook" in the repo) ---
 const TUNNEL_BOOK = 'https://raw.githubusercontent.com/ussosundarganj0-art/opentube-site/main/tunnel.json';
 let tunnelCache = { at: 0, url: null };
