@@ -16,7 +16,7 @@ RUN pip3 install --no-cache-dir --break-system-packages yt-dlp imageio-ffmpeg bg
 # PO-token provider (helps yt-dlp on datacenter IPs) — build is non-fatal
 RUN git clone --single-branch --branch 2.0.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil-src \
     && cd /opt/bgutil-src/server \
-    && { npm ci && npx tsc; } || echo "WARNING: provider build failed (app will still run)" \
+    && { npm ci --include=dev && npx tsc; } || { echo "WARNING: provider build failed"; npx tsc 2>&1 | tail -20 > /opt/bgutil-src/tsc-error.log || true; } \
     && mv /opt/bgutil-src /opt/bgutil
 
 WORKDIR /app
