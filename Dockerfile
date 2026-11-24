@@ -6,15 +6,17 @@ ENV NODE_ENV=production
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip ffmpeg curl ca-certificates git \
+    build-essential pkg-config python3-dev \
+    libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # yt-dlp + plugin + bundled ffmpeg fallback
 RUN pip3 install --no-cache-dir --break-system-packages yt-dlp imageio-ffmpeg bgutil-ytdlp-pot-provider
 
-# PO-token provider (helps yt-dlp on datacenter IPs)
+# PO-token provider (helps yt-dlp on datacenter IPs) — build is non-fatal
 RUN git clone --single-branch --branch 2.0.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil-src \
     && cd /opt/bgutil-src/server \
-    && npm ci && npx tsc \
+    && { npm ci && npx tsc; } || echo "WARNING: provider build failed (app will still run)" \
     && mv /opt/bgutil-src /opt/bgutil
 
 WORKDIR /app
@@ -25,4 +27,4 @@ RUN mkdir -p /tmp/othyb && useradd -m appuser && chown -R appuser /app
 USER appuser
 
 EXPOSE 7860
-CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js & exec node server.js"]
+CMD ["sh", "-c", "(node /opt/bgutil/server/build/main.js &) ; exec node server.js"]
