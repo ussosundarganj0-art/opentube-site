@@ -358,12 +358,12 @@ if (process.env.KEEP_AWAKE !== '0') {
 }
 
 // --- Turbo mode: clean-IP extraction via the sandbox tunnel (tunnel.json "phonebook" in the repo) ---
-const TUNNEL_BOOK = 'https://raw.githubusercontent.com/ussosundarganj0-art/opentube-site/main/tunnel.json';
+const TUNNEL_BOOK_BASE = 'https://raw.githubusercontent.com/ussosundarganj0-art/opentube-site/main/tunnel.json';
 let tunnelCache = { at: 0, url: null };
 async function getTunnelUrl() {
-  if (tunnelCache.url && Date.now() - tunnelCache.at < 120000) return tunnelCache.url;
+  if (tunnelCache.url && Date.now() - tunnelCache.at < 30000) return tunnelCache.url;
   try {
-    const r = await fetch(TUNNEL_BOOK, { signal: AbortSignal.timeout(8000), cache: 'no-store' });
+    const r = await fetch(TUNNEL_BOOK_BASE + '?ts=' + Date.now(), { signal: AbortSignal.timeout(8000), cache: 'no-store' });
     const j = await r.json();
     let u = null;
     try {
