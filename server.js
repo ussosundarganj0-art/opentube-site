@@ -302,7 +302,7 @@ function dlpJson(id) {
   if (c) return Promise.resolve(c);
   return new Promise((resolve, reject) => {
     execFile('yt-dlp', ['-j', '--no-warnings', '--no-playlist', '--socket-timeout', '15',
-      'https://www.youtube.com/watch?v=' + id], { timeout: 40000 }, (err, stdout) => {
+      'https://www.youtube.com/watch?v=' + id], { timeout: 90000 }, (err, stdout) => {
       if (err) return reject(err);
       try {
         const j = JSON.parse(stdout);
