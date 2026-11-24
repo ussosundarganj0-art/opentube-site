@@ -302,7 +302,7 @@ async function apiYtDebug(req, res, params) {
   const { execFile } = require('child_process');
   const out = { variant: variant || '(default)', vid };
   await new Promise((resolve) => {
-    const r = http.get('http://127.0.0.1:4416/version', (pr) => {
+    const r = http.get('http://127.0.0.1:4416/ping', (pr) => {
       let b = ''; pr.on('data', (c) => b += c);
       pr.on('end', () => { out.provider = b.slice(0, 200); resolve(); });
     });
@@ -316,7 +316,7 @@ async function apiYtDebug(req, res, params) {
     });
   });
   await new Promise((resolve) => {
-    const args = ['-j', '--no-warnings', '--no-playlist', '--socket-timeout', '15'];
+    const args = ['-j', '-v', '--no-playlist', '--socket-timeout', '15'];
     if (variant) args.push('--extractor-args', 'youtube:player-client=' + variant);
     args.push('https://www.youtube.com/watch?v=' + vid);
     const t0 = Date.now();
@@ -325,7 +325,9 @@ async function apiYtDebug(req, res, params) {
       if (e) {
         out.ok = false;
         out.error = String(e.message).slice(0, 200);
-        out.stderr = String(se).split('\n').filter((l) => l.trim()).slice(-8).join(' | ').slice(0, 800);
+        const sl = String(se).split('\n').filter((l) => l.trim());
+        out.poLine = (sl.find((l) => l.includes('PO Token Providers')) || out.poLine).trim();
+        out.stderr = (sl.slice(0, 6).concat(sl.slice(-12))).join(' | ').slice(0, 1200);
       } else {
         try {
           const j = JSON.parse(so.split('\n')[0] || '{}');
