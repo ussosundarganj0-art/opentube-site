@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # yt-dlp + plugin + bundled ffmpeg fallback
-RUN pip3 install --no-cache-dir --break-system-packages yt-dlp imageio-ffmpeg bgutil-ytdlp-pot-provider
+RUN pip3 install --no-cache-dir --break-system-packages yt-dlp==2026.10.26 imageio-ffmpeg bgutil-ytdlp-pot-provider==2.0.2
 
 # PO-token provider (helps yt-dlp on datacenter IPs) — build is non-fatal
 RUN git clone --single-branch --branch 2.0.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil-src \
