@@ -338,7 +338,7 @@ async function apiYtDebug(req, res, params) {
       resolve();
     });
   });
-  return json(res, 200, out);
+  return sendJSON(res, 200, out);
 }
 
 function dlpJson(id) {
