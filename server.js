@@ -334,6 +334,7 @@ async function apiYtDebug(req, res, params) {
           out.ok = true;
           out.title = j.title;
           out.formats = (j.formats || []).length;
+            out.sample = (j.formats || []).slice(0, 12).map((f) => ({ p: f.protocol, v: String(f.vcodec).slice(0, 12), a: String(f.acodec).slice(0, 12), h: f.height, url: f.url ? 'Y' : 'N' }));
           out.maxH = Math.max(0, ...(j.formats || []).map((f) => f.height || 0));
         } catch (pe) { out.ok = false; out.parseError = String(pe); out.head = String(so).slice(0, 200); }
       }
@@ -368,8 +369,8 @@ function dlpJson(id) {
 
 function normDlpStreams(d, id) {
   const fmts = d.formats || [];
-  const vids = fmts.filter(f => f.url && f.protocol === 'https' && /^avc1/.test(f.vcodec || '') && f.height);
-  const auds = fmts.filter(f => f.url && f.protocol === 'https' && /^mp4a/.test(f.acodec || ''));
+  const vids = fmts.filter(f => f.url && (f.protocol === 'https' || f.protocol === 'http') && f.vcodec && f.vcodec !== 'none' && f.height);
+  const auds = fmts.filter(f => f.url && (f.protocol === 'https' || f.protocol === 'http') && f.acodec && f.acodec !== 'none');
   if (!vids.length || !auds.length) return null;
   auds.sort((a, b) => (b.abr || 0) - (a.abr || 0));
   const bestAudio = auds[0];
