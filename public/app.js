@@ -16,6 +16,7 @@ const DICT = {
     navEdu: 'এডুকেশন', navTech: 'টেক', navBengali: 'বাংলা', navDocs: 'ডকুমেন্টারি',
     navNature: 'নেচার', navSports: 'স্পোর্টস', navClassics: 'ক্লাসিক',
     navHistory: 'হিস্ট্রি', navWatchLater: 'পরে দেখব', navLiked: 'পছন্দের', navSubs: 'সাবস্ক্রিপশন',
+    loadPreparing: 'প্রস্তুত হচ্ছে...', loadBuffering: 'বাফার হচ্ছে...', qualitySwitched: 'নেটওয়ার্ক ধীর — কোয়ালিটি পরিবর্তন করা হলো',
     navSongs: 'গান 🎵', navYtTrending: 'YouTube ট্রেন্ডিং', navYtMusic: 'মিউজিক ভিডিও',
     hero: 'YouTube-এর সম্পূর্ণ ক্যাটালগ + ফ্রি মুভি ও ডকুমেন্টারি — গান, ভিডিও, চ্যানেল সব এক জায়গায়।',
     rowYtTrending: '🔥 YouTube ট্রেন্ডিং', rowSongs: '🎵 গান (Songs)', rowBanglaSongs: '🎶 বাংলা গান',
@@ -62,6 +63,7 @@ const DICT = {
     navEdu: 'Education', navTech: 'Tech', navBengali: 'Bengali', navDocs: 'Documentaries',
     navNature: 'Nature', navSports: 'Sports', navClassics: 'Classics',
     navHistory: 'History', navWatchLater: 'Watch later', navLiked: 'Liked', navSubs: 'Subscriptions',
+    loadPreparing: 'Preparing...', loadBuffering: 'Buffering...', qualitySwitched: 'Slow network - quality switched',
     navSongs: 'Songs 🎵', navYtTrending: 'YouTube Trending', navYtMusic: 'Music Videos',
     hero: "YouTube's full catalog plus free movies & documentaries — songs, videos and channels, all in one place.",
     rowYtTrending: '🔥 YouTube Trending', rowSongs: '🎵 Songs', rowBanglaSongs: '🎶 Bengali songs',
@@ -790,6 +792,7 @@ async function renderWatch(sid) {
           <source src="${esc(q0.url)}" type="video/mp4">
           ${(m.subtitles || []).map((s, i) => `<track kind="subtitles" src="${esc(s.url)}" label="${esc(s.label)}" ${i === 0 ? 'default' : ''}>`).join('')}
         </video>
+        <div id="playerLoad" class="player-load hide"><div class="spinner"></div><div id="playerLoadTxt">${t('loadPreparing')}</div></div>
       </div>`;
   } else if (m.embedUrl) {
     playerHtml = `<div class="player-wrap">
@@ -887,20 +890,59 @@ async function renderWatch(sid) {
       if (playing) video.play().catch(() => {});
     });
   }
-  // auto-recover: if the stream request fails (network blip), silently retry
+  // auto-recover + quality fallback: never leave the user with a dead player
   if (video) {
-    let vRetry = 0;
+    const loadBox = document.getElementById('playerLoad');
+    const loadTxt = document.getElementById('playerLoadTxt');
+    let vTried = 0, stallTimer = null;
+    const hideLoad = () => { if (loadBox) loadBox.classList.add('hide'); if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } };
+    const showLoad = (msg) => { if (loadBox) { loadBox.classList.remove('hide'); if (loadTxt) loadTxt.textContent = msg; } };
+    const fallbackIdx = () => {
+      const quals = m.qualities || [];
+      const curIdx = qsel ? [...qsel.options].findIndex(o => o.selected) : 0;
+      const cur = quals[curIdx] || {};
+      const lower = quals.map((q, i) => ({ q, i })).filter(x => x.i !== curIdx && (!cur.height || (x.q.height || 0) < cur.height));
+      if (lower.length) {
+        lower.sort((a, b) => ((a.q.instant ? 0 : 1) - (b.q.instant ? 0 : 1)) || ((b.q.height || 0) - (a.q.height || 0)));
+        return lower[0].i;
+      }
+      return curIdx;
+    };
+    const armStall = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        if (!video.isConnected || vTried >= 3) return;
+        vTried++;
+        const next = fallbackIdx();
+        if (qsel && next >= 0) {
+          showToast(t('qualitySwitched') + ' \u2192 ' + (((m.qualities || [])[next] || {}).label || ''));
+          qsel.selectedIndex = next;
+          qsel.dispatchEvent(new Event('change'));
+        }
+        armStall();
+      }, 20000);
+    };
+    video.addEventListener('loadstart', () => { showLoad(t('loadPreparing')); armStall(); });
+    video.addEventListener('waiting', () => showLoad(t('loadBuffering')));
+    video.addEventListener('playing', hideLoad);
+    video.addEventListener('canplay', hideLoad);
+    video.addEventListener('loadeddata', hideLoad);
     video.addEventListener('error', () => {
-      if (vRetry >= 2) return;
-      vRetry++;
-      const cur = video.currentSrc || video.src;
-      if (!cur) return;
+      if (vTried >= 3) return;
+      vTried++;
       setTimeout(() => {
         if (!video.isConnected) return;
-        video.src = cur;
-        video.load();
-        video.play().catch(() => {});
-      }, 2500 * vRetry);
+        const next = fallbackIdx();
+        if (qsel && next >= 0) {
+          showToast(t('qualitySwitched') + ' \u2192 ' + (((m.qualities || [])[next] || {}).label || ''));
+          qsel.selectedIndex = next;
+          qsel.dispatchEvent(new Event('change'));
+        } else {
+          const cur = video.currentSrc || video.src;
+          if (cur) { video.src = cur; video.load(); video.play().catch(() => {}); }
+        }
+        armStall();
+      }, 1500);
     }, true);
   }
 

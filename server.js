@@ -68,6 +68,10 @@ function parseLength(len) {
   return isNaN(n) ? null : Math.round(n);
 }
 function pickDefaultQuality(quals) {
+  // prefer the best "instant" (direct-stream, no remux) quality up to 720p
+  for (let i = 0; i < quals.length; i++) {
+    if (quals[i].instant && quals[i].height && quals[i].height <= 720) return i;
+  }
   let idx = 0;
   for (let i = 0; i < quals.length; i++) {
     if (quals[i].height && quals[i].height <= 480) { idx = i; break; }
@@ -411,12 +415,32 @@ function normDlpStreams(d, id) {
     const curSz = cur ? (cur.filesize || cur.filesize_approx || 0) : -1;
     if (!cur || sz > curSz) byH.set(f.height, f);
   }
-  const qualities = [...byH.entries()].sort((a, b) => b[0] - a[0]).map(([h, f]) => ({
-    label: h + 'p',
-    url: '/api/yt/hybrid?vid=' + encodeURIComponent(id) + '&h=' + h,
-    size: (f.filesize || f.filesize_approx || 0) + (bestAudio.filesize || bestAudio.filesize_approx || 0),
-    height: h,
-  }));
+  // Progressive muxed formats (audio+video in one file) play instantly - use them directly
+  const muxed = fmts.filter(f => f.url && (f.protocol === 'https' || f.protocol === 'http') && f.vcodec && f.vcodec !== 'none' && f.acodec && f.acodec !== 'none' && f.height);
+  const muxedByH = new Map();
+  for (const f of muxed) {
+    const cur = muxedByH.get(f.height);
+    const sz = f.filesize || f.filesize_approx || 0;
+    const curSz = cur ? (cur.filesize || cur.filesize_approx || 0) : -1;
+    if (!cur || sz > curSz) muxedByH.set(f.height, f);
+  }
+  const qualities = [...byH.entries()].sort((a, b) => b[0] - a[0]).map(([h, f]) => {
+    const m = muxedByH.get(h);
+    if (m) {
+      const msize = m.filesize || m.filesize_approx || 0;
+      return {
+        label: h + 'p',
+        url: '/sproxy?u=' + encodeURIComponent(m.url) + (msize ? '&size=' + msize : ''),
+        size: msize, height: h, instant: true,
+      };
+    }
+    return {
+      label: h + 'p',
+      url: '/api/yt/hybrid?vid=' + encodeURIComponent(id) + '&h=' + h,
+      size: (f.filesize || f.filesize_approx || 0) + (bestAudio.filesize || bestAudio.filesize_approx || 0),
+      height: h, instant: false,
+    };
+  });
   return {
     source: 'yt', kind: 'video', id,
     title: d.title || '',
