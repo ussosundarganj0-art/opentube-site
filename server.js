@@ -1324,6 +1324,12 @@ if (!process.env.RENDER) {
         } else if (Date.now() - t0 > 75000) { clearInterval(iv); tmLog('slot', i, 'no URL in time'); }
       } catch (_) {}
     }, 1500);
+    slot.child.on('error', (e) => {
+      try { clearInterval(iv); } catch (_) {}
+      tmLog('slot', i, 'spawn error:', e.message, '- retrying');
+      slot.child = null;
+      setTimeout(() => startTunnelSlot(i), 5000);
+    });
     slot.child.on('exit', () => {
       try { clearInterval(iv); } catch (_) {}
       tmLog('slot', i, 'exited - restarting');
