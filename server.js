@@ -18,6 +18,12 @@ const PIPED_INSTANCES = [
   'https://pipedapi.ducks.party',
   'https://pipedapi.adminforge.de',
   'https://api.piped.yt',
+  'https://pipedapi.reallyaweso.me',
+  'https://pipedapi.leptons.xyz',
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.drgns.space',
+  'https://pipedapi.privacydev.net',
+  'https://pipedapi-libre.kavin.rocks',
 ];
 
 /* ---------------- tiny TTL cache ---------------- */
@@ -370,10 +376,13 @@ async function getTunnelUrl() {
     const r = await fetch(TUNNEL_BOOK_BASE + '?ts=' + Date.now(), { signal: AbortSignal.timeout(8000), cache: 'no-store' });
     const j = await r.json();
     let u = null;
-    try {
-      const host = new URL(String(j.url || '')).host;
-      if (host.endsWith('.trycloudflare.com')) u = String(j.url).replace(/\/$/, '');
-    } catch (_) {}
+    const list = Array.isArray(j.urls) && j.urls.length ? j.urls : [j.url];
+    for (const cand of list) {
+      try {
+        const host = new URL(String(cand || '')).host;
+        if (host.endsWith('.trycloudflare.com') || host.endsWith('.lhr.life')) { u = String(cand).replace(/\/$/, ''); break; }
+      } catch (_) {}
+    }
     tunnelCache = { at: Date.now(), url: u };
     return u;
   } catch (_) {
@@ -381,8 +390,11 @@ async function getTunnelUrl() {
   }
 }
 
+const dlpFail = new Map();
 function dlpJson(id) {
   const key = 'dlp|' + id;
+  const f = dlpFail.get(key);
+  if (f && Date.now() - f < 600000) return Promise.reject(new Error('extract recently failed'));
   const c = cacheGet(key);
   if (c) return Promise.resolve(c);
   return new Promise((resolve, reject) => {
@@ -391,7 +403,7 @@ function dlpJson(id) {
     if (extra) args.push(...extra.split(' '));
     args.push('https://www.youtube.com/watch?v=' + id);
     execFile('yt-dlp', args, { timeout: 90000 }, (err, stdout) => {
-      if (err) return reject(err);
+      if (err) { dlpFail.set(key, Date.now()); return reject(err); }
       try {
         const j = JSON.parse(stdout);
         cacheSet(key, j);
@@ -554,14 +566,40 @@ function streamGrowing(file, res, isDone) {
   pump();
 }
 
+async function pipeFromTunnel(req, res, tunnelPath) {
+  const t = await getTunnelUrl();
+  if (!t) { res.writeHead(502); return res.end('tunnel down'); }
+  try {
+    const headers = {};
+    if (req.headers.range) headers.range = req.headers.range;
+    const ac = new AbortController();
+    const tm = setTimeout(() => ac.abort(), 20000);
+    const r = await fetch(t + tunnelPath, { headers, signal: ac.signal });
+    clearTimeout(tm);
+    const out = {
+      'content-type': r.headers.get('content-type') || 'video/mp4',
+      'accept-ranges': r.headers.get('accept-ranges') || 'bytes',
+      'cache-control': 'public, max-age=86400',
+      'access-control-allow-origin': '*',
+    };
+    for (const hh of ['content-length', 'content-range']) { const v = r.headers.get(hh); if (v) out[hh] = v; }
+    res.writeHead(r.status, out);
+    if (r.body) { Readable.fromWeb(r.body).pipe(res); } else { res.end(); }
+  } catch (e) {
+    if (!res.headersSent) { res.writeHead(502); res.end('pipe failed'); } else { try { res.end(); } catch (_) {} }
+  }
+}
+
 async function ytHybrid(req, res, params) {
   const vid = params.get('vid') || '';
   const h = parseInt(params.get('h') || '720', 10) || 720;
+  const via = params.get('via') || '';
   if (!/^[\w-]{8,14}$/.test(vid)) { res.writeHead(400); return res.end('bad vid'); }
   const key = vid + '_' + h;
   const fin = path.join(HB_DIR, key + '.mp4');
   const part = path.join(HB_DIR, key + '.part');
   if (fs.existsSync(fin)) return sendFileRange(req, res, fin);
+  if (via) return pipeFromTunnel(req, res, '/api/yt/hybrid?vid=' + encodeURIComponent(vid) + '&h=' + h);
   let pick;
   try { pick = await dlpPick(vid, h); }
   catch (e) { res.writeHead(502); return res.end('extract failed: ' + e.message); }
@@ -773,12 +811,16 @@ async function apiYtStreams(id, res) {
     if (t) {
       const r = await fetch(t + '/api/yt/streams/' + encodeURIComponent(id), { signal: AbortSignal.timeout(35000) }).then((x) => x.json());
       if (r && !r.unavailable && ((r.qualities || []).length || (r.streams || []).length)) {
+        const rel = (u) => {
+          if (u.startsWith('/api/yt/hybrid')) return u + (u.includes('?') ? '&' : '?') + 'via=1';
+          return '/sproxy?u=' + encodeURIComponent(t + u);
+        };
         const fix = (arr) => (arr || []).forEach((x) => {
-          if (x && typeof x.url === 'string' && x.url.startsWith('/')) x.url = t + x.url;
-          if (x && x.hls && typeof x.hls.url === 'string' && x.hls.url.startsWith('/')) x.hls.url = t + x.hls.url;
+          if (x && typeof x.url === 'string' && x.url.startsWith('/')) x.url = rel(x.url);
+          if (x && x.hls && typeof x.hls.url === 'string' && x.hls.url.startsWith('/')) x.hls.url = rel(x.hls.url);
         });
         fix(r.qualities); fix(r.streams); fix(r.subtitles);
-        if (typeof r.thumb === 'string' && r.thumb.startsWith('/')) r.thumb = t + r.thumb;
+        if (typeof r.thumb === 'string' && r.thumb.startsWith('/')) r.thumb = '/sproxy?u=' + encodeURIComponent(t + r.thumb);
         r.via = 'turbo';
         return sendJSON(res, 200, r);
       }
@@ -898,7 +940,9 @@ function proxyAllowed(u) {
       /(^|\.)googlevideo\.com$/.test(h) ||
       /(^|\.)ytimg\.com$/.test(h) ||
       /(^|\.)ggpht\.com$/.test(h) ||
-      /(^|\.)archive\.org$/.test(h);
+      /(^|\.)archive\.org$/.test(h) ||
+      /\.trycloudflare\.com$/.test(h) ||
+      /\.lhr\.life$/.test(h);
   } catch (_) { return false; }
 }
 function ttmlToVtt(xml) {
@@ -1249,6 +1293,86 @@ async function apiDbCommentPost(req, res) {
     headers: { 'Prefer': 'return=representation' },
   });
   return sendJSON(res, 200, { ok: true, item: { user: name, text, ts: Date.now(), cloud: true } });
+}
+
+/* ---------------- tunnel manager (sandbox only; Render sets RENDER env) ---------------- */
+if (!process.env.RENDER) {
+  const CF_BIN = '/home/user/cloudflared';
+  const TUN_COUNT = 2;
+  let GH_PAT = '';
+  try { GH_PAT = JSON.parse(fs.readFileSync('/home/user/secrets.json', 'utf8')).githubPat || ''; } catch (_) {}
+  const tmState = { tunnels: [], published: '' };
+  const tmLog = (...a) => console.log('[tunnel]', ...a);
+
+  function startTunnelSlot(i) {
+    let slot = tmState.tunnels[i];
+    if (!slot) slot = tmState.tunnels[i] = { url: null, fails: 0, child: null, log: '/tmp/cf-tunnel-' + i + '.log' };
+    try { if (slot.child) slot.child.kill('SIGTERM'); } catch (_) {}
+    const out = fs.openSync(slot.log, 'w');
+    slot.child = spawn(CF_BIN, ['tunnel', '--url', 'http://localhost:' + (Number(PORT) || 3000), '--protocol', 'http2', '--retries', '0'], { stdio: ['ignore', out, out] });
+    slot.url = null; slot.fails = 0;
+    tmLog('slot', i, 'starting');
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      try {
+        const txt = fs.readFileSync(slot.log, 'utf8');
+        const m = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/.exec(txt);
+        if (m && txt.includes('Registered tunnel connection')) {
+          slot.url = m[0]; clearInterval(iv);
+          tmLog('slot', i, 'UP', slot.url);
+          publishTunnels();
+        } else if (Date.now() - t0 > 75000) { clearInterval(iv); tmLog('slot', i, 'no URL in time'); }
+      } catch (_) {}
+    }, 1500);
+    slot.child.on('exit', () => {
+      try { clearInterval(iv); } catch (_) {}
+      tmLog('slot', i, 'exited - restarting');
+      setTimeout(() => startTunnelSlot(i), 3000);
+    });
+  }
+
+  async function publishTunnels() {
+    if (!GH_PAT) return;
+    const urls = tmState.tunnels.map((s) => s.url).filter(Boolean);
+    if (!urls.length) return;
+    const sig = urls.join(',');
+    if (sig === tmState.published) return;
+    tmState.published = sig;
+    try {
+      const api = 'https://api.github.com/repos/ussosundarganj0-art/opentube-site/contents/tunnel.json';
+      let sha = '';
+      try {
+        const r0 = await fetch(api, { headers: { Authorization: 'Bearer ' + GH_PAT, Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(10000) });
+        sha = ((await r0.json()) || {}).sha || '';
+      } catch (_) {}
+      const content = Buffer.from(JSON.stringify({ url: urls[0], urls, updated: new Date().toISOString() })).toString('base64');
+      const body = { message: 'tunnel manager: update urls', content };
+      if (sha) body.sha = sha;
+      await fetch(api, { method: 'PUT', headers: { Authorization: 'Bearer ' + GH_PAT, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+      tmLog('published', sig);
+    } catch (e) { tmLog('publish failed', String(e).slice(0, 120)); }
+  }
+
+  function checkTunnels() {
+    tmState.tunnels.forEach((slot, i) => {
+      if (!slot.url || !slot.child || slot.child.exitCode !== null) return;
+      fetch(slot.url + '/api/config', { signal: AbortSignal.timeout(15000) })
+        .then((r) => { slot.fails = r.ok ? 0 : slot.fails + 1; })
+        .catch(() => { slot.fails += 1; })
+        .finally(() => {
+          if (slot.fails >= 2) {
+            tmLog('slot', i, 'unhealthy - restarting');
+            startTunnelSlot(i);
+          }
+        });
+    });
+    setTimeout(checkTunnels, 45000);
+  }
+
+  try { execSync("pkill -f 'cloudflared tunnel' 2>/dev/null || true"); } catch (_) {}
+  for (let i = 0; i < TUN_COUNT; i++) startTunnelSlot(i);
+  setTimeout(checkTunnels, 45000);
+  setInterval(publishTunnels, 300000);
 }
 
 /* ---------------- server ---------------- */
