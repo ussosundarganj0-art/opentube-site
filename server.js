@@ -1343,7 +1343,6 @@ if (!process.env.RENDER) {
     if (!urls.length) return;
     const sig = urls.join(',');
     if (sig === tmState.published) return;
-    tmState.published = sig;
     try {
       const api = 'https://api.github.com/repos/ussosundarganj0-art/opentube-site/contents/tunnel.json';
       let sha = '';
@@ -1354,7 +1353,9 @@ if (!process.env.RENDER) {
       const content = Buffer.from(JSON.stringify({ url: urls[0], urls, updated: new Date().toISOString() })).toString('base64');
       const body = { message: 'tunnel manager: update urls', content };
       if (sha) body.sha = sha;
-      await fetch(api, { method: 'PUT', headers: { Authorization: 'Bearer ' + GH_PAT, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+      const rp = await fetch(api, { method: 'PUT', headers: { Authorization: 'Bearer ' + GH_PAT, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+      if (!rp.ok) throw new Error('PUT ' + rp.status);
+      tmState.published = sig;
       tmLog('published', sig);
     } catch (e) { tmLog('publish failed', String(e).slice(0, 120)); }
   }
